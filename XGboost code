@@ -1,0 +1,164 @@
+#==========================================================================
+#Import the needed python modules
+
+import numpy as np
+import pandas as pd
+#import matplotlib.pyplot as plt
+#from sklearn.metrics import log_loss
+#from sklearn.grid_search import GridSearchCV
+#from sklearn.datasets import make_classification
+#from sklearn.ensemble import RandomForestClassifier
+from sklearn import preprocessing
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn import cross_validation
+from sklearn import metrics
+import xgboost as xgb
+from sklearn.cross_validation import train_test_split
+from sklearn.cross_validation import StratifiedKFold
+from sklearn.metrics import accuracy_score
+#===========================================================================
+#Load training and test datasets
+train = pd.read_csv("/home/isaacalabi/.virtualenvs/kaggleprojects/lib/python3.5/site-packages/Y112015fulldataAddSci.csv")
+
+#Features to be used to machine learning training
+
+train = train.drop('Name', 1)
+train = train.drop('CoreSciGCSE',1)
+train = train.drop('AddSciGCSE',1)
+train = train.drop('Y11 AM4',1)
+
+#train = train.drop('Y11 AM3',1)
+#train = train.drop('Y11 AM2',1)
+#train = train.drop('Y11 Mock1',1)
+#train = train.drop('Y11 AM1',1)
+train = train.drop('Attendance',1)
+train = train.drop('CAT',1)
+train = train.drop('KS2',1)
+
+#Year 10 features
+train = train.drop('Group',1)
+train = train.drop('SEN',1)
+train = train.drop('PP',1)
+train = train.drop('Target',1)
+train = train.drop('AM3',1)
+train = train.drop('AM4',1)
+train = train.drop('AM5',1)
+train = train.drop('AM6',1)
+train = train.drop('Y10 Mock',1)
+
+train_sure = pd.read_csv("/home/isaacalabi/.virtualenvs/kaggleprojects/lib/python3.5/site-packages/2017AddSci_sure.csv")
+#train_sure = train_sure.drop('Y11 AM3',1)
+train_sure = train_sure.drop('Name', 1)
+train_sure = train_sure.drop('Attendance',1)
+train_sure = train_sure.drop('CAT',1)
+train_sure = train_sure.drop('KS2',1)
+train_sure = train_sure.drop('Target',1)
+train_sure = train_sure.drop('Y10 Mock',1)
+
+y = train['Class'] #Target to use for training algorithm. Change this, depending on what you want to predict
+y_sure = train_sure['Class_sure']
+Y = pd.concat([y, y_sure],axis=0)
+
+del train['Class']
+del train_sure['Class_sure']
+
+
+
+x = train
+x2 = train_sure
+
+X = pd.concat([x, x2], axis=0)
+
+#===============================================================================================================
+#Load test data for predictions
+test = pd.read_csv("/home/isaacalabi/.virtualenvs/kaggleprojects/lib/python3.5/site-packages/2017AddSci.csv")
+
+test_id = test['Name']
+test = test.drop('Name', 1)
+
+#Year 11 features
+
+#test = test.drop('Y11 AM3',1)
+#test = test.drop('Y11 AM2',1)
+#test = test.drop('Y11 Mock1',1)
+#test = test.drop('Y11 AM1',1)
+
+#Year 10 features
+
+test = test.drop('Attendance',1)
+test = test.drop('CAT',1)
+test = test.drop('KS2',1)
+test = test.drop('Target',1)
+test = test.drop('Y10 Mock',1)
+
+test = test[['Y11 AM1','Y11 Mock1','Y11 AM2', 'Y11 AM3']]
+
+Data_combined = pd.concat([X, test],axis=0)
+
+from sklearn.preprocessing import PolynomialFeatures
+poly = PolynomialFeatures(1)
+
+data_new= poly.fit_transform(Data_combined)
+
+X_new = data_new[:len(X)]
+
+test_new = data_new[len(X):]
+
+#====================================================================================================================
+#Algorithm will train a model using the training data
+
+X_train, X_val, y_train, y_val = cross_validation.train_test_split(X_new, Y, train_size=0.80, stratify = Y, random_state=42)
+
+dtrain = xgb.DMatrix(X_train, y_train)
+
+dvalid = xgb.DMatrix(X_val, y_val)
+
+params = {
+    "objective": "multi:softprob",
+    "num_class": 2,
+    "booster": "gbtree",
+    "max_depth":2,#controls model complexity, higher values may cause overfitting, higher variance
+    "eval_metric": "mlogloss",
+    "eta": 0.2,# learning rate, you can reduce eta to prevent overfitting but remember to increase num_round
+    "silent": 1,
+    "alpha": 0,#L1 regularization on weights, increase to make model more conservative
+    "seed": 0,
+    "lambda": 4,#L2 regularization on weights, increase to make model more conservative
+    "sample_type": "uniform",
+    "normalize_type":"weighted",
+    "subsample": 1,#adds randomness to make training robust to noise. 0.5 means half of data instances collected and noise added
+    "colsample_bytree": 0.5,#adds randomness to make training robust to noise. subsamples ratio of columns,not rows
+    "max_delta_step":1,
+    "num_round": 500
+
+}
+
+watchlist = [(dtrain, 'train'), (dvalid, 'eval')]
+
+gbm = xgb.train(params, dtrain, 3000, evals=watchlist,
+                early_stopping_rounds=40, verbose_eval=True)
+
+print("Training step")
+
+dtrain = xgb.DMatrix(X_new, Y)
+
+gbm = xgb.train(params, dtrain, 3000, verbose_eval=True)
+
+importance = gbm.get_fscore()
+print("The importance of the features:", importance)
+
+
+#===============================================================================
+
+predicted = gbm.predict(xgb.DMatrix(test_new),ntree_limit=gbm.best_iteration)
+
+print("Test data predictions...",predicted[:,1])
+
+print('Saving the predictions to csv file...you have done well to wait')
+
+#pd.DataFrame({"Student": test_id, "PredictedProb": predicted[:,1]}).to_csv('AddSci2017PredxgbMar19.csv',index=False)
+
+#xgb.plot_importance(gbm) to plot importance of features in model
+gbm.dump_model('Mar12xgbmodel.txt') # to save model
+#gbm.load_model("Dec24xgbmodel.text") to load model
+print("Prediction of test data completed")
